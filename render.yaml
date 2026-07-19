@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: campusmind-web
+    runtime: python
+    repo: https://github.com/yourusername/campusmind-web.git
+    plan: free
+    branch: main
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python backend/main.py"
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: DASHSCOPE_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.6"
+    autoDeploy: yes

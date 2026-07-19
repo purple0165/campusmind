@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 数据库
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 向量库
+vectorstore/
+chroma.sqlite3
+
+# 日志
+*.log
+*.out
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 配置（包含敏感信息，不要提交）
+config/config.yaml
+
+# 临时文件
+*.tmp
+*.bak
