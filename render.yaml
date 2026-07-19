@@ -2,7 +2,7 @@ services:
   - type: web
     name: campusmind-web
     runtime: python
-    repo: https://github.com/yourusername/campusmind-web.git
+    repo: https://github.com/purple0165/campusmind.git
     plan: free
     branch: main
     buildCommand: "pip install -r requirements.txt"
