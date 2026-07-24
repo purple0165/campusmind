@@ -1,3 +1,4 @@
 #!/bin/bash
-pip install -r requirements.txt
-PORT=9000 python backend/main.py
+cd /var/user
+export PORT=9000
+/var/lang/python39/bin/python3.9 backend/standalone_server.py

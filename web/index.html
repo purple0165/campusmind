@@ -84,31 +84,43 @@
     }
 
     async function api(path, options = {}) {
+      const timeout = options.timeout || 10000;
       const headers = options.headers || {};
       if (STATE.token) headers["Authorization"] = "Bearer " + STATE.token;
       if (options.body && !(options.body instanceof FormData) && !headers["Content-Type"]) {
         headers["Content-Type"] = "application/json";
       }
-      const resp = await fetch(API_BASE + path, { ...options, headers });
-      const ct = resp.headers.get("content-type") || "";
-      let data = null;
-      if (ct.includes("application/json")) {
-        data = await resp.json().catch(() => ({}));
-      } else {
-        data = { detail: await resp.text() };
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      try {
+        const resp = await fetch(API_BASE + path, { ...options, headers, signal: controller.signal });
+        clearTimeout(timeoutId);
+        const ct = resp.headers.get("content-type") || "";
+        let data = null;
+        if (ct.includes("application/json")) {
+          data = await resp.json().catch(() => ({}));
+        } else {
+          data = { detail: await resp.text() };
+        }
+        if (resp.status === 401 && !path.startsWith("/api/auth/")) {
+          STATE.token = "";
+          STATE.user = null;
+          saveAuth();
+          STATE.page = "login";
+          render();
+        }
+        if (!resp.ok) {
+          const msg = (data && (data.detail || data.error)) || ("请求失败: " + resp.status);
+          throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+        }
+        return data;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+          throw new Error("请求超时");
+        }
+        throw err;
       }
-      if (resp.status === 401 && !path.startsWith("/api/auth/")) {
-        STATE.token = "";
-        STATE.user = null;
-        saveAuth();
-        STATE.page = "login";
-        render();
-      }
-      if (!resp.ok) {
-        const msg = (data && (data.detail || data.error)) || ("请求失败: " + resp.status);
-        throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
-      }
-      return data;
     }
 
     function escapeHtml(s) {
@@ -206,6 +218,7 @@
         const username = document.getElementById("username").value.trim();
         const password = document.getElementById("password").value;
         const password2 = document.getElementById("password2")?.value;
+
         const errEl = document.getElementById("auth-error");
         const btn = document.getElementById("auth-submit");
         errEl.classList.add("hidden");
@@ -292,7 +305,7 @@
       return `
         <div class="flex h-screen">
           ${renderSidebar()}
-          <main class="flex-1 flex flex-col bg-white ${sidebarWidth}">
+          <main class="flex-1 flex flex-col bg-white ${sidebarWidth} overflow-y-auto overflow-x-hidden">
             ${STATE.page === "chat" ? renderChat() : STATE.page === "docs" ? renderDocs() : STATE.page === "settings" ? renderSettings() : renderAbout()}
           </main>
         </div>
@@ -431,7 +444,7 @@
           <div id="chat-messages" class="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin px-8 py-6 space-y-5">
             ${msgs.length ? msgs.map((m, i) => renderMessage(m, i)).join("") : `<div class="text-center py-20 text-slate-400 text-sm">没有找到匹配的消息</div>`}
           </div>
-          <div class="bg-white backdrop-blur-sm border-t border-slate-100 px-8 py-4">
+          <div class="bg-white backdrop-blur-sm border-t border-slate-100 px-8 py-4 sticky bottom-0 z-50">
             <div id="chat-form" class="flex gap-4">
               <div class="flex-1 relative">
                 <input id="chat-input" type="text" placeholder="试试问：现在几点？/ 杭州天气如何？/ 365*24=? / 图书馆开放时间" class="w-full px-5 py-3.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent transition-all placeholder:text-slate-400 text-slate-800" autocomplete="off" />
@@ -898,43 +911,43 @@
             for (const line of lines) {
               if (!line.trim()) continue;
               try {
-                const event = JSON.parse(line);
-                if (event.session_id) STATE.sessionId = event.session_id;
+                const event = JSON.parse(line.trim());
+                  if (event.session_id) STATE.sessionId = event.session_id;
 
-                if (event.type === "thinking") {
-                  const thinkingText = `思考中... ${event.partial || ""}`;
-                  STATE.messages[assistantMsgIndex] = { role: "assistant", content: thinkingText, steps: currentSteps };
-                  if (currentSteps.length) {
-                    updateMessageElWithSteps(assistantEl, thinkingText, currentSteps);
-                  } else {
-                    updateMessageEl(assistantEl, thinkingText);
-                  }
-                } else if (event.type === "steps") {
-                  currentSteps = event.steps || [];
-                  STATE.messages[assistantMsgIndex] = { role: "assistant", content: currentAnswer, steps: currentSteps };
-                  updateMessageElWithSteps(assistantEl, currentAnswer, currentSteps);
-                } else if (event.type === "observation") {
-                  const obsText = `观察: ${event.observation || ""}`;
-                  STATE.messages[assistantMsgIndex] = { role: "assistant", content: obsText, steps: currentSteps };
-                  if (currentSteps.length) {
-                    updateMessageElWithSteps(assistantEl, obsText, currentSteps);
-                  } else {
-                    updateMessageEl(assistantEl, obsText);
-                  }
-                } else if (event.type === "answer") {
-                  currentAnswer = event.answer || "";
-                  STATE.messages[assistantMsgIndex] = { role: "assistant", content: currentAnswer, steps: currentSteps };
-                  if (currentSteps.length) {
+                  if (event.type === "thinking") {
+                    const thinkingText = `思考中... ${event.partial || ""}`;
+                    STATE.messages[assistantMsgIndex] = { role: "assistant", content: thinkingText, steps: currentSteps };
+                    if (currentSteps.length) {
+                      updateMessageElWithSteps(assistantEl, thinkingText, currentSteps);
+                    } else {
+                      updateMessageEl(assistantEl, thinkingText);
+                    }
+                  } else if (event.type === "steps") {
+                    currentSteps = event.steps || [];
+                    STATE.messages[assistantMsgIndex] = { role: "assistant", content: currentAnswer, steps: currentSteps };
                     updateMessageElWithSteps(assistantEl, currentAnswer, currentSteps);
-                  } else {
-                    updateMessageEl(assistantEl, currentAnswer);
+                  } else if (event.type === "observation") {
+                    const obsText = `观察: ${event.observation || ""}`;
+                    STATE.messages[assistantMsgIndex] = { role: "assistant", content: obsText, steps: currentSteps };
+                    if (currentSteps.length) {
+                      updateMessageElWithSteps(assistantEl, obsText, currentSteps);
+                    } else {
+                      updateMessageEl(assistantEl, obsText);
+                    }
+                  } else if (event.type === "answer") {
+                    currentAnswer = event.answer || "";
+                    STATE.messages[assistantMsgIndex] = { role: "assistant", content: currentAnswer, steps: currentSteps };
+                    if (currentSteps.length) {
+                      updateMessageElWithSteps(assistantEl, currentAnswer, currentSteps);
+                    } else {
+                      updateMessageEl(assistantEl, currentAnswer);
+                    }
+                  } else if (event.type === "error") {
+                    throw new Error(event.error || "未知错误");
                   }
-                } else if (event.type === "error") {
-                  throw new Error(event.error || "未知错误");
+                } catch (parseErr) {
+                  console.error("解析事件失败:", parseErr);
                 }
-              } catch (parseErr) {
-                console.error("解析事件失败:", parseErr);
-              }
             }
           }
 
@@ -1129,52 +1142,70 @@
     }
 
     async function init() {
-      if (STATE.token) {
-        try {
-          const me = await api("/api/auth/me");
-          STATE.user = { id: me.id, username: me.username, role: me.role };
-          saveAuth();
-          STATE.page = "chat";
+      console.log("[DEBUG] init() started");
+      try {
+        if (STATE.token) {
+          console.log("[DEBUG] token found, checking auth");
           try {
-            const resp = await api("/api/sessions");
-            STATE.sessions = resp.sessions || [];
-            const savedSessionId = localStorage.getItem("campusmind_session");
-            if (savedSessionId && STATE.sessions.some(s => s.session_id === savedSessionId)) {
-              try {
-                const msgResp = await api(`/api/sessions/${savedSessionId}`);
-                STATE.sessionId = savedSessionId;
-                STATE.messages = msgResp.messages || [];
-              } catch (e) {
-                console.warn("Failed to restore saved session:", e);
-                STATE.sessionId = "";
-                saveSession();
+            const me = await api("/api/auth/me");
+            STATE.user = { id: me.id, username: me.username, role: me.role };
+            saveAuth();
+            STATE.page = "chat";
+            console.log("[DEBUG] auth ok, loading sessions");
+            try {
+              const resp = await api("/api/sessions");
+              STATE.sessions = resp.sessions || [];
+              console.log(`[DEBUG] loaded ${STATE.sessions.length} sessions`);
+              const savedSessionId = localStorage.getItem("campusmind_session");
+              if (savedSessionId && STATE.sessions.some(s => s.session_id === savedSessionId)) {
+                try {
+                  const msgResp = await api(`/api/sessions/${savedSessionId}`);
+                  STATE.sessionId = savedSessionId;
+                  STATE.messages = msgResp.messages || [];
+                  console.log(`[DEBUG] restored session ${savedSessionId}`);
+                } catch (e) {
+                  console.warn("Failed to restore saved session:", e);
+                  STATE.sessionId = "";
+                  saveSession();
+                }
+              } else if (STATE.sessions.length > 0) {
+                const latest = STATE.sessions[0];
+                try {
+                  const msgResp = await api(`/api/sessions/${latest.session_id}`);
+                  STATE.sessionId = latest.session_id;
+                  STATE.messages = msgResp.messages || [];
+                  saveSession();
+                  console.log(`[DEBUG] loaded latest session ${latest.session_id}`);
+                } catch (e) {
+                  console.warn("Failed to load latest session:", e);
+                }
               }
-            } else if (STATE.sessions.length > 0) {
-              const latest = STATE.sessions[0];
-              try {
-                const msgResp = await api(`/api/sessions/${latest.session_id}`);
-                STATE.sessionId = latest.session_id;
-                STATE.messages = msgResp.messages || [];
-                saveSession();
-              } catch (e) {
-                console.warn("Failed to load latest session:", e);
-              }
+            } catch (err) {
+              console.error("Failed to load sessions on init:", err);
             }
           } catch (err) {
-            console.error("Failed to load sessions on init:", err);
+            console.warn("Auth check failed:", err);
+            STATE.token = "";
+            STATE.user = null;
+            STATE.sessionId = "";
+            STATE.sessions = [];
+            STATE.messages = [];
+            saveAuth();
+            saveSession();
+            STATE.page = "login";
           }
-        } catch (err) {
-          STATE.token = "";
-          STATE.user = null;
-          STATE.sessionId = "";
-          STATE.sessions = [];
-          STATE.messages = [];
-          saveAuth();
-          saveSession();
+        } else {
+          console.log("[DEBUG] no token, showing login");
           STATE.page = "login";
         }
+        console.log("[DEBUG] rendering page:", STATE.page);
+        render();
+        console.log("[DEBUG] init() completed");
+      } catch (err) {
+        console.error("[ERROR] init() failed:", err);
+        STATE.page = "login";
+        render();
       }
-      render();
     }
 
     init();
